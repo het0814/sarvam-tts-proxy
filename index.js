@@ -56,7 +56,7 @@ app.post('/tts', async (req, res) => {
       },
       body: JSON.stringify({
         text:                 text,
-        target_language_code: lang,
+        target_language_code: gu-IN,
         speaker:              speaker,
         model:                'bulbul:v3',
         pace:                 1.0,
