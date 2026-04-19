@@ -1,27 +1,29 @@
 const express = require('express');
+const fetch = (...args) => import('node-fetch').then(({default: fetch}) => fetch(...args));
+
 const app = express();
 app.use(express.json());
 
 app.post('/tts', async (req, res) => {
   const { message } = req.body;
 
-  // Validate Vapi's request format
   if (!message || message.type !== 'voice-request' || !message.text) {
     return res.status(400).json({ error: 'Invalid request' });
   }
 
   const text    = message.text;
-  const speaker = message.voiceId || 'dev'; // "dev" comes from Vapi Voice ID field
+  const speaker = message.voiceId || 'dev';
 
-  // Detect language from Unicode script blocks
   const detectLang = (t) => {
-    if (/[\u0A80-\u0AFF]/.test(t)) return 'gu-IN'; // Gujarati script
-    if (/[\u0A00-\u0A7F]/.test(t)) return 'pa-IN'; // Gurmukhi (Punjabi)
-    if (/[\u0900-\u097F]/.test(t)) return 'hi-IN'; // Devanagari (Hindi)
-    return 'en-IN';                                 // Default English
+    if (/[\u0A80-\u0AFF]/.test(t)) return 'gu-IN';
+    if (/[\u0A00-\u0A7F]/.test(t)) return 'pa-IN';
+    if (/[\u0900-\u097F]/.test(t)) return 'hi-IN';
+    return 'en-IN';
   };
 
   try {
+    console.log(`TTS request: "${text.substring(0, 50)}" | speaker: ${speaker} | lang: ${detectLang(text)}`);
+
     const sarvamRes = await fetch('https://api.sarvam.ai/text-to-speech/stream', {
       method: 'POST',
       headers: {
@@ -34,33 +36,38 @@ app.post('/tts', async (req, res) => {
         speaker: speaker,
         model: 'bulbul:v3',
         pace: 1.0,
-        speech_sample_rate: 16000,      // Vapi requires 16000 Hz
-        output_audio_codec: 'linear16', // 'linear16' = PCM — what Vapi requires
-                                        // NOT 'pcm' — that's the wrong value per Sarvam docs
+        speech_sample_rate: 16000,
+        output_audio_codec: 'linear16',
         enable_preprocessing: true
       })
     });
 
+    console.log(`Sarvam response status: ${sarvamRes.status}`);
+
     if (!sarvamRes.ok) {
       const errText = await sarvamRes.text();
-      console.error('Sarvam error:', sarvamRes.status, errText);
-      return res.status(502).json({ error: 'Sarvam TTS failed', detail: errText });
+      console.error('Sarvam error body:', errText);
+      return res.status(502).json({ 
+        error: 'Sarvam TTS failed', 
+        status: sarvamRes.status,
+        detail: errText 
+      });
     }
 
-    // Vapi requires these exact response headers for PCM audio
     res.setHeader('Content-Type', 'audio/raw');
     res.setHeader('X-Sample-Rate', '16000');
     res.setHeader('X-Channels', '1');
     res.setHeader('X-Bit-Depth', '16');
 
-    // Pipe raw binary stream directly — no buffering, no base64 decoding needed
-    // Sarvam HTTP stream returns raw binary, not JSON/base64 like the REST endpoint
     sarvamRes.body.pipe(res);
 
   } catch (err) {
-    console.error('Proxy error:', err);
+    console.error('Proxy error:', err.message);
     if (!res.headersSent) {
-      res.status(500).json({ error: 'Internal proxy error' });
+      res.status(500).json({ 
+        error: 'Internal proxy error',
+        detail: err.message
+      });
     }
   }
 });
